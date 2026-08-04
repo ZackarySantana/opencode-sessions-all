@@ -1,5 +1,7 @@
 # opencode-sessions-all
 
+[![npm](https://img.shields.io/npm/v/opencode-sessions-all)](https://www.npmjs.com/package/opencode-sessions-all)
+
 Cross-project session search and navigation with a native OpenCode TUI.
 
 `/sessions-all` opens a keyboard-first browser over sessions indexed from every project you use after installing the plugin. Search session titles, project paths, and message text without leaving OpenCode.
