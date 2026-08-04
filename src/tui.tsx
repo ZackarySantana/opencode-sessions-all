@@ -20,11 +20,12 @@ const commands = {
   down: "opencode-sessions-all.down",
   select: "opencode-sessions-all.select",
   refresh: "opencode-sessions-all.refresh",
+  subagents: "opencode-sessions-all.subagents",
 }
 
 type Color = RGBA | string
 type BackRoute = { name: string; params?: Record<string, unknown> }
-export type BrowserState = { query: string; projectID?: string; selected: number; back: BackRoute }
+export type BrowserState = { query: string; projectID?: string; showSubagents: boolean; selected: number; back: BackRoute }
 type StateStore = { get: () => BrowserState; set: (state: BrowserState) => void }
 
 type Skin = {
@@ -59,6 +60,10 @@ function skin(api: TuiPluginApi): Skin {
 export function clampSelection(selected: number, count: number) {
   if (count <= 0) return 0
   return Math.max(0, Math.min(selected, count - 1))
+}
+
+export function filterSubagents(rows: SessionSearchResult[], showSubagents: boolean) {
+  return showSubagents ? rows : rows.filter((row) => !row.parentID)
 }
 
 export function resumeCommand(directory: string, sessionID: string) {
@@ -103,7 +108,7 @@ function Browser(props: { api: TuiPluginApi; index: SessionIndex; state: StateSt
   const rows = createMemo(() => {
     revision()
     try {
-      return props.index.search(state().query, state().projectID, 100)
+      return filterSubagents(props.index.search(state().query, state().projectID, 100), state().showSubagents)
     } catch {
       return []
     }
@@ -137,6 +142,7 @@ function Browser(props: { api: TuiPluginApi; index: SessionIndex; state: StateSt
         <box flexDirection="row" gap={2}>
           <Hint keyText="/" action="search" colors={colors} />
           <Hint keyText="p" action="project" colors={colors} />
+          <Hint keyText="s" action="subagents" colors={colors} />
           {showExtendedHints(dimensions().width) ? <Hint keyText="j/k" action="move" colors={colors} /> : null}
           {showExtendedHints(dimensions().width) ? <Hint keyText="enter" action="open" colors={colors} /> : null}
           {showExtendedHints(dimensions().width) ? <Hint keyText="esc" action="back" colors={colors} /> : null}
@@ -149,6 +155,9 @@ function Browser(props: { api: TuiPluginApi; index: SessionIndex; state: StateSt
         </box>
         <box border borderColor={colors.border} paddingLeft={1} paddingRight={1}>
           <text fg={colors.muted}>project: <span style={{ fg: colors.text }}>{project()}</span></text>
+        </box>
+        <box border borderColor={colors.border} paddingLeft={1} paddingRight={1}>
+          <text fg={colors.muted}>subagents: <span style={{ fg: colors.text }}>{state().showSubagents ? "shown" : "hidden"}</span></text>
         </box>
         <box paddingLeft={1} paddingRight={1}>
           <text fg={colors.muted}>{rows().length} sessions</text>
@@ -231,7 +240,8 @@ function Hint(props: { keyText: string; action: string; colors: Skin }) {
 }
 
 function registerCommands(api: TuiPluginApi, index: SessionIndex, state: StateStore) {
-  const update = (next: BrowserState) => state.set({ ...next, selected: clampSelection(next.selected, index.search(next.query, next.projectID).length) })
+  const search = (value: BrowserState) => filterSubagents(index.search(value.query, value.projectID), value.showSubagents)
+  const update = (next: BrowserState) => state.set({ ...next, selected: clampSelection(next.selected, search(next).length) })
 
   api.keymap.registerLayer({
     commands: [{
@@ -244,7 +254,7 @@ function registerCommands(api: TuiPluginApi, index: SessionIndex, state: StateSt
       slashAliases: ["all-sessions"],
       run() {
         const current = api.route.current
-        state.set({ query: "", selected: 0, back: { name: current.name, params: "params" in current ? current.params : undefined } })
+        state.set({ query: "", showSubagents: false, selected: 0, back: { name: current.name, params: "params" in current ? current.params : undefined } })
         api.route.navigate(ROUTE)
       },
     }],
@@ -258,13 +268,15 @@ function registerCommands(api: TuiPluginApi, index: SessionIndex, state: StateSt
       { name: commands.down, title: "Next", hidden: true, run() { const value = state.get(); update({ ...value, selected: value.selected + 1 }) } },
       { name: commands.clear, title: "Clear filters", hidden: true, run() { const value = state.get(); update({ ...value, query: "", projectID: undefined, selected: 0 }) } },
       { name: commands.refresh, title: "Refresh", hidden: true, run() { state.set({ ...state.get() }) } },
+      { name: commands.subagents, title: "Toggle subagents", hidden: true, run() { const value = state.get(); update({ ...value, showSubagents: !value.showSubagents, selected: 0 }) } },
       {
         name: commands.select,
         title: "Open session",
         hidden: true,
         run() {
           const value = state.get()
-          const row = index.search(value.query, value.projectID)[clampSelection(value.selected, index.search(value.query, value.projectID).length)]
+          const rows = search(value)
+          const row = rows[clampSelection(value.selected, rows.length)]
           if (!row) return
           if (row.directory === api.state.path.directory) {
             api.route.navigate("session", { sessionID: row.id })
@@ -330,6 +342,7 @@ function registerCommands(api: TuiPluginApi, index: SessionIndex, state: StateSt
       { key: "escape", cmd: commands.close, desc: "Back" },
       { key: "/", cmd: commands.search, desc: "Search" },
       { key: "p", cmd: commands.project, desc: "Project" },
+      { key: "s", cmd: commands.subagents, desc: "Toggle subagents" },
       { key: "x", cmd: commands.clear, desc: "Clear filters" },
       { key: "r", cmd: commands.refresh, desc: "Refresh" },
       { key: "up,k", cmd: commands.up, desc: "Previous" },
@@ -341,7 +354,7 @@ function registerCommands(api: TuiPluginApi, index: SessionIndex, state: StateSt
 
 const tui: TuiPlugin = async (api, options) => {
   const index = new SessionIndex(databasePath(api.state.path.state, options?.database))
-  const [value, setValue] = createSignal<BrowserState>({ query: "", selected: 0, back: { name: "home" } })
+  const [value, setValue] = createSignal<BrowserState>({ query: "", showSubagents: false, selected: 0, back: { name: "home" } })
   const state: StateStore = { get: value, set: setValue }
   api.lifecycle.onDispose(() => {
     if (api.route.current.name === ROUTE) api.route.navigate("home")

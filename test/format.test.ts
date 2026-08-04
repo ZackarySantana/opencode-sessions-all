@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 import { formatCost, formatTokens, relativeTime, shorten } from "../src/format.js"
-import { clampSelection, contextPercent, currentSessionID, previewWidth, resumeCommand, sessionTokens, showExtendedHints } from "../src/tui.js"
+import { clampSelection, contextPercent, currentSessionID, filterSubagents, previewWidth, resumeCommand, sessionTokens, showExtendedHints } from "../src/tui.js"
 
 test("formats list values", () => {
   const now = 1_000_000_000
@@ -36,6 +36,12 @@ test("clamps keyboard selection", () => {
   expect(clampSelection(9, 5)).toBe(4)
   expect(clampSelection(2, 5)).toBe(2)
   expect(clampSelection(2, 0)).toBe(0)
+})
+
+test("hides subagents by default and shows them when toggled", () => {
+  const rows = [{ id: "root" }, { id: "child", parentID: "root" }]
+  expect(filterSubagents(rows as never, false).map((row) => row.id)).toEqual(["root"])
+  expect(filterSubagents(rows as never, true).map((row) => row.id)).toEqual(["root", "child"])
 })
 
 test("identifies the session from which the browser opened", () => {
