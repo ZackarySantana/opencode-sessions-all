@@ -1,6 +1,6 @@
 {
   "name": "opencode-sessions-all",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Cross-project session search and navigation for OpenCode",
   "type": "module",
   "author": "ZackarySantana",
@@ -13,7 +13,11 @@
   "bugs": {
     "url": "https://github.com/ZackarySantana/opencode-sessions-all/issues"
   },
-  "files": ["dist", "README.md", "LICENSE"],
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "exports": {
     "./server": {
       "import": "./dist/server.js",
@@ -33,7 +37,13 @@
     "test": "bun test",
     "prepublishOnly": "bun run build && bun test && bun run typecheck"
   },
-  "keywords": ["opencode", "opencode-plugin", "sessions", "search", "tui"],
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "sessions",
+    "search",
+    "tui"
+  ],
   "peerDependencies": {
     "@opencode-ai/plugin": ">=1.18.11 <2",
     "@opentui/core": ">=0.4.5 <1",
