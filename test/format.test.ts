@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 import { formatCost, formatTokens, relativeTime, shorten } from "../src/format.js"
-import { clampSelection, contextPercent, previewWidth, resumeCommand, sessionTokens, showExtendedHints } from "../src/tui.js"
+import { clampSelection, contextPercent, currentSessionID, previewWidth, resumeCommand, sessionTokens, showExtendedHints } from "../src/tui.js"
 
 test("formats list values", () => {
   const now = 1_000_000_000
@@ -36,4 +36,10 @@ test("clamps keyboard selection", () => {
   expect(clampSelection(9, 5)).toBe(4)
   expect(clampSelection(2, 5)).toBe(2)
   expect(clampSelection(2, 0)).toBe(0)
+})
+
+test("identifies the session from which the browser opened", () => {
+  expect(currentSessionID({ name: "session", params: { sessionID: "ses_current" } })).toBe("ses_current")
+  expect(currentSessionID({ name: "home" })).toBeUndefined()
+  expect(currentSessionID({ name: "session", params: {} })).toBeUndefined()
 })

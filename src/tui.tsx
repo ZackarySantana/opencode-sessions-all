@@ -36,6 +36,7 @@ type Skin = {
   primary: Color
   selected: Color
   secondary: Color
+  success: Color
   error: Color
 }
 
@@ -50,6 +51,7 @@ function skin(api: TuiPluginApi): Skin {
     primary: theme.primary,
     selected: theme.selectedListItemText,
     secondary: theme.secondary,
+    success: theme.success,
     error: theme.error,
   }
 }
@@ -85,6 +87,10 @@ export function modelContext(api: TuiPluginApi, row?: SessionSearchResult) {
   return api.state.provider.find((provider) => provider.id === row.providerID)?.models[row.modelID]?.limit.context
 }
 
+export function currentSessionID(back: BackRoute) {
+  return back.name === "session" && typeof back.params?.sessionID === "string" ? back.params.sessionID : undefined
+}
+
 function shellQuote(value: string) {
   return `'${value.replaceAll("'", `'\\''`)}'`
 }
@@ -106,6 +112,7 @@ function Browser(props: { api: TuiPluginApi; index: SessionIndex; state: StateSt
     try { compileQuery(state().query); return "" } catch (error) { return error instanceof Error ? error.message : "Invalid regular expression" }
   })
   const selected = createMemo(() => clampSelection(state().selected, rows().length))
+  const current = () => currentSessionID(state().back)
   const project = () => props.index.projects().find((item) => item.id === state().projectID)?.label ?? "all projects"
   const timer = setInterval(() => setRevision((value) => value + 1), 5_000)
   const popMode = props.api.mode.push(MODE)
@@ -160,7 +167,7 @@ function Browser(props: { api: TuiPluginApi; index: SessionIndex; state: StateSt
         <box flexGrow={1} flexDirection="row" gap={1}>
           <box flexGrow={2} border borderColor={colors.border} backgroundColor={colors.panel} flexDirection="column">
             {rows().slice(0, Math.max(1, dimensions().height - 9)).map((row, index) => (
-              <SessionRow row={row} active={index === selected()} colors={colors} width={dimensions().width} />
+              <SessionRow row={row} active={index === selected()} current={row.id === current()} colors={colors} width={dimensions().width} />
             ))}
           </box>
           {dimensions().width >= 100 ? (
@@ -177,8 +184,10 @@ function Browser(props: { api: TuiPluginApi; index: SessionIndex; state: StateSt
   )
 }
 
-function SessionRow(props: { row: SessionSearchResult; active: boolean; colors: Skin; width: number }) {
+function SessionRow(props: { row: SessionSearchResult; active: boolean; current: boolean; colors: Skin; width: number }) {
   const subagent = () => Boolean(props.row.parentID)
+  const marker = () => props.current ? "[current] " : subagent() ? "[subagent] " : ""
+  const markerColor = () => props.current ? props.colors.success : props.colors.secondary
   return (
     <box
       flexDirection="row"
@@ -187,8 +196,8 @@ function SessionRow(props: { row: SessionSearchResult; active: boolean; colors: 
       paddingLeft={1}
       paddingRight={1}
     >
-      <text fg={props.active ? props.colors.selected : subagent() ? props.colors.secondary : props.colors.text}>
-        {props.active ? ">" : " "} {subagent() ? "subagent " : ""}{shorten(props.row.title, Math.max(20, props.width - 56))}
+      <text fg={props.active ? props.colors.selected : props.colors.text}>
+        {props.active ? ">" : " "} <span style={{ fg: props.active ? props.colors.selected : markerColor() }}>{marker()}</span>{shorten(props.row.title, Math.max(20, props.width - 58))}
       </text>
       <text fg={props.active ? props.colors.selected : props.colors.muted}>
         {shorten(props.row.project, 18)}  {relativeTime(props.row.updatedAt)}

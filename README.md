@@ -4,6 +4,8 @@ Cross-project session search and navigation with a native OpenCode TUI.
 
 `/sessions-all` opens a keyboard-first browser over sessions indexed from every project you use after installing the plugin. Search session titles, project paths, and message text without leaving OpenCode.
 
+![opencode-sessions-all dashboard showing cross-project sessions, subagents, search filters, and session details](https://raw.githubusercontent.com/ZackarySantana/opencode-sessions-all/main/assets/oc-sessions-all-demo.png)
+
 ## Install
 
 Install globally so every opened project contributes to the shared index:
