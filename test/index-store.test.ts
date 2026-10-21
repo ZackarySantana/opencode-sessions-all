@@ -37,6 +37,15 @@ describe("SessionIndex", () => {
     index.close()
   })
 
+  test("removes deleted sessions and their messages without affecting other projects", () => {
+    const index = new SessionIndex(":memory:")
+    seed(index)
+    index.removeSession("s1")
+    expect(index.search().map((row) => row.id)).toEqual(["s2"])
+    expect(index.db.query("SELECT id FROM messages WHERE session_id = 's1'").all()).toEqual([])
+    index.close()
+  })
+
   test("aggregates assistant metrics and remembers the latest model", () => {
     const index = new SessionIndex(":memory:")
     index.upsertSession({ id: "s1", projectID: "p1", directory: "/work/alpha", title: "Mixed models", createdAt: 1, updatedAt: 2 })

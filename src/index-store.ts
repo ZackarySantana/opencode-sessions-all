@@ -111,6 +111,13 @@ export class SessionIndex {
     this.db.close(false)
   }
 
+  removeSession(sessionID: string) {
+    this.db.transaction(() => {
+      this.db.query("DELETE FROM messages WHERE session_id = ?").run(sessionID)
+      this.db.query("DELETE FROM sessions WHERE id = ?").run(sessionID)
+    })()
+  }
+
   upsertSession(input: SessionInput) {
     this.db.query<unknown, Record<string, string | number | null>>(`
       INSERT INTO sessions (id, project_id, directory, title, parent_id, created_at, updated_at, indexed_at)

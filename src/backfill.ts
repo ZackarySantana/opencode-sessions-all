@@ -1,30 +1,58 @@
-import type { PluginInput } from "@opencode-ai/plugin"
+import type { OpenCodeClient } from "@opencode/client"
 import { messageInput, sessionInput } from "./indexer.js"
 import type { SessionIndex } from "./index-store.js"
 
-type Client = PluginInput["client"]
+export type IndexClient = {
+  session: Pick<OpenCodeClient["session"], "list" | "get" | "context">
+  message?: OpenCodeClient["message"]
+}
 
-export async function backfillProject(
-  client: Client,
-  index: SessionIndex,
-  context: { projectID: string; directory: string },
-  signal?: AbortSignal,
-) {
-  const sessions = await client.session.list({ query: { directory: context.directory }, signal })
-  if (sessions.error) throw new Error("Unable to list sessions for indexing")
+export async function indexSession(client: IndexClient, index: SessionIndex, sessionID: string, signal?: AbortSignal, directory?: string) {
+  const session = await client.session.get({ sessionID }, { signal })
+  signal?.throwIfAborted()
+  if (directory && session.location.directory !== directory) return
+  index.upsertSession(sessionInput(session))
 
-  for (const session of sessions.data ?? []) {
+  if (!client.message) {
+    const messages = await client.session.context({ sessionID }, { signal })
     signal?.throwIfAborted()
-    index.upsertSession(sessionInput(session))
-    const messages = await client.session.messages({
-      path: { id: session.id },
-      query: { directory: session.directory },
-      signal,
-    })
-    if (messages.error) throw new Error(`Unable to read session ${session.id} for indexing`)
-    for (const item of messages.data ?? []) index.upsertMessage(messageInput(item.info, item.parts))
+    for (const message of messages) {
+      const input = messageInput(sessionID, message)
+      if (input) index.upsertMessage(input)
+    }
+    return
   }
 
+  let cursor: string | undefined
+  do {
+    const page = await client.message.list({ sessionID, limit: 100, ...(cursor ? { cursor } : { order: "asc" }) }, { signal })
+    signal?.throwIfAborted()
+    for (const message of page.data) {
+      const input = messageInput(sessionID, message)
+      if (input) index.upsertMessage(input)
+    }
+    cursor = page.cursor.next ?? undefined
+  } while (cursor)
+}
+
+export async function backfillProject(
+  client: IndexClient,
+  index: SessionIndex,
+  context: { projectID?: string; directory: string },
+  signal?: AbortSignal,
+) {
+  let cursor: string | undefined
+  const projectIDs = new Set(context.projectID ? [context.projectID] : [])
+  do {
+    const page = await client.session.list(cursor ? { cursor, limit: 100 } : { directory: context.directory, limit: 100 }, { signal })
+    for (const session of page.data) {
+      signal?.throwIfAborted()
+      projectIDs.add(session.projectID)
+      await indexSession(client, index, session.id, signal)
+    }
+    cursor = page.cursor.next ?? undefined
+  } while (cursor)
+
   signal?.throwIfAborted()
-  index.markBackfilled(context.projectID, context.directory)
+  for (const projectID of projectIDs) index.markBackfilled(projectID, context.directory)
 }

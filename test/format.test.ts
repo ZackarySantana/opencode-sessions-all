@@ -45,7 +45,7 @@ test("hides subagents by default and shows them when toggled", () => {
 })
 
 test("identifies the session from which the browser opened", () => {
-  expect(currentSessionID({ name: "session", params: { sessionID: "ses_current" } })).toBe("ses_current")
-  expect(currentSessionID({ name: "home" })).toBeUndefined()
-  expect(currentSessionID({ name: "session", params: {} })).toBeUndefined()
+  expect(currentSessionID({ type: "session", sessionID: "ses_current" })).toBe("ses_current")
+  expect(currentSessionID({ type: "home" })).toBeUndefined()
+  expect(currentSessionID({ type: "plugin", id: "another-plugin", name: "page" })).toBeUndefined()
 })

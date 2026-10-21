@@ -1,11 +1,14 @@
 /** @jsxImportSource @opentui/solid */
 
 import type { RGBA } from "@opentui/core"
-import type { TuiPlugin, TuiPluginApi, TuiPluginModule } from "@opencode-ai/plugin/tui"
+import { Plugin } from "@opencode/plugin/tui"
+import type { Context, Route } from "@opencode/plugin/tui/context"
 import { useTerminalDimensions } from "@opentui/solid"
 import { createMemo, createSignal, onCleanup } from "solid-js"
 import { formatCost, formatTokens, relativeTime, shorten } from "./format.js"
 import { SessionIndex, compileQuery, databasePath, type SessionSearchResult } from "./index-store.js"
+import { backfillProject } from "./backfill.js"
+import { opencodeStateDirectory } from "./state.js"
 
 const ROUTE = "opencode-sessions-all.browser"
 const MODE = "opencode-sessions-all.browser"
@@ -24,7 +27,7 @@ const commands = {
 }
 
 type Color = RGBA | string
-type BackRoute = { name: string; params?: Record<string, unknown> }
+type BackRoute = Route
 export type BrowserState = { query: string; projectID?: string; showSubagents: boolean; selected: number; back: BackRoute }
 type StateStore = { get: () => BrowserState; set: (state: BrowserState) => void }
 
@@ -41,19 +44,19 @@ type Skin = {
   error: Color
 }
 
-function skin(api: TuiPluginApi): Skin {
-  const theme = api.theme.current
+function skin(api: Context): Skin {
+  const theme = api.theme
   return {
-    background: theme.background,
-    panel: theme.backgroundPanel,
-    border: theme.border,
-    text: theme.text,
-    muted: theme.textMuted,
-    primary: theme.primary,
-    selected: theme.selectedListItemText,
-    secondary: theme.secondary,
-    success: theme.success,
-    error: theme.error,
+    get background() { return theme.background.base },
+    get panel() { return theme.background.raised.base },
+    get border() { return theme.border.base },
+    get text() { return theme.text.base },
+    get muted() { return theme.text.muted },
+    get primary() { return theme.background.action.primary.selected },
+    get selected() { return theme.text.action.primary.selected },
+    get secondary() { return theme.text.action.secondary.base },
+    get success() { return theme.text.feedback.success.base },
+    get error() { return theme.text.feedback.error.base },
   }
 }
 
@@ -87,20 +90,20 @@ export function contextPercent(tokens: number, context?: number) {
   return `${Math.round(tokens / context * 100)}%`
 }
 
-export function modelContext(api: TuiPluginApi, row?: SessionSearchResult) {
+export function modelContext(api: Context, row?: SessionSearchResult) {
   if (!row?.providerID || !row.modelID) return undefined
-  return api.state.provider.find((provider) => provider.id === row.providerID)?.models[row.modelID]?.limit.context
+  return api.data.location.model.list(api.location)?.find((model) => model.providerID === row.providerID && model.id === row.modelID)?.limit.context
 }
 
 export function currentSessionID(back: BackRoute) {
-  return back.name === "session" && typeof back.params?.sessionID === "string" ? back.params.sessionID : undefined
+  return back.type === "session" ? back.sessionID : undefined
 }
 
 function shellQuote(value: string) {
   return `'${value.replaceAll("'", `'\\''`)}'`
 }
 
-function Browser(props: { api: TuiPluginApi; index: SessionIndex; state: StateStore }) {
+function Browser(props: { api: Context; index: SessionIndex; state: StateStore }) {
   const dimensions = useTerminalDimensions()
   const colors = skin(props.api)
   const state = props.state.get
@@ -120,7 +123,7 @@ function Browser(props: { api: TuiPluginApi; index: SessionIndex; state: StateSt
   const current = () => currentSessionID(state().back)
   const project = () => props.index.projects().find((item) => item.id === state().projectID)?.label ?? "all projects"
   const timer = setInterval(() => setRevision((value) => value + 1), 5_000)
-  const popMode = props.api.mode.push(MODE)
+  const popMode = props.api.keymap.mode.push(MODE)
   onCleanup(() => {
     clearInterval(timer)
     popMode()
@@ -215,7 +218,7 @@ function SessionRow(props: { row: SessionSearchResult; active: boolean; current:
   )
 }
 
-function Preview(props: { api: TuiPluginApi; row?: SessionSearchResult; colors: Skin; width: number }) {
+function Preview(props: { api: Context; row?: SessionSearchResult; colors: Skin; width: number }) {
   const model = () => props.row?.providerID && props.row.modelID ? `${props.row.providerID}/${props.row.modelID}` : "unknown model"
   const tokens = () => props.row ? sessionTokens(props.row) : 0
   return (
@@ -239,130 +242,130 @@ function Hint(props: { keyText: string; action: string; colors: Skin }) {
   return <text fg={props.colors.muted}><span style={{ fg: props.colors.text }}>{props.keyText}</span> {props.action}</text>
 }
 
-function registerCommands(api: TuiPluginApi, index: SessionIndex, state: StateStore) {
-  const search = (value: BrowserState) => filterSubagents(index.search(value.query, value.projectID), value.showSubagents)
+export function registerCommands(api: Context, index: SessionIndex, state: StateStore) {
+  const search = (value: BrowserState) => {
+    try { return filterSubagents(index.search(value.query, value.projectID), value.showSubagents) } catch { return [] }
+  }
   const update = (next: BrowserState) => state.set({ ...next, selected: clampSelection(next.selected, search(next).length) })
 
-  api.keymap.registerLayer({
+  api.keymap.layer(() => ({
+    mode: "global",
     commands: [{
-      name: commands.open,
+      id: commands.open,
       title: "All sessions",
-      desc: "Search sessions across every indexed OpenCode project",
-      category: "Session",
-      namespace: "palette",
-      slashName: "sessions-all",
-      slashAliases: ["all-sessions"],
+      description: "Search sessions across every indexed OpenCode project",
+      group: "Session",
+      palette: true,
+      slash: { name: "sessions-all", aliases: ["all-sessions"] },
       run() {
-        const current = api.route.current
-        state.set({ query: "", showSubagents: false, selected: 0, back: { name: current.name, params: "params" in current ? current.params : undefined } })
-        api.route.navigate(ROUTE)
+        const current = api.ui.router.current()
+        if (current.type === "plugin" && current.name === ROUTE) return
+        state.set({ query: "", showSubagents: false, selected: 0, back: current })
+        api.ui.router.navigate({ type: "plugin", name: ROUTE })
       },
     }],
-  })
+  }))
 
-  api.keymap.registerLayer({
+  api.keymap.layer(() => ({
     mode: MODE,
     commands: [
-      { name: commands.close, title: "Close", hidden: true, run() { const value = state.get(); api.route.navigate(value.back.name, value.back.params) } },
-      { name: commands.up, title: "Previous", hidden: true, run() { const value = state.get(); update({ ...value, selected: value.selected - 1 }) } },
-      { name: commands.down, title: "Next", hidden: true, run() { const value = state.get(); update({ ...value, selected: value.selected + 1 }) } },
-      { name: commands.clear, title: "Clear filters", hidden: true, run() { const value = state.get(); update({ ...value, query: "", projectID: undefined, selected: 0 }) } },
-      { name: commands.refresh, title: "Refresh", hidden: true, run() { state.set({ ...state.get() }) } },
-      { name: commands.subagents, title: "Toggle subagents", hidden: true, run() { const value = state.get(); update({ ...value, showSubagents: !value.showSubagents, selected: 0 }) } },
+      { id: commands.close, bind: "escape", title: "Close", run() { api.ui.router.navigate(state.get().back) } },
+      { id: commands.up, bind: "up,k", title: "Previous", run() { const value = state.get(); update({ ...value, selected: value.selected - 1 }) } },
+      { id: commands.down, bind: "down,j", title: "Next", run() { const value = state.get(); update({ ...value, selected: value.selected + 1 }) } },
+      { id: commands.clear, bind: "x", title: "Clear filters", run() { const value = state.get(); update({ ...value, query: "", projectID: undefined, selected: 0 }) } },
+      { id: commands.refresh, bind: "r", title: "Refresh", run() { state.set({ ...state.get() }) } },
+      { id: commands.subagents, bind: "s", title: "Toggle subagents", run() { const value = state.get(); update({ ...value, showSubagents: !value.showSubagents, selected: 0 }) } },
       {
-        name: commands.select,
+        id: commands.select,
+        bind: "enter,return",
         title: "Open session",
-        hidden: true,
-        run() {
+        async run() {
           const value = state.get()
           const rows = search(value)
           const row = rows[clampSelection(value.selected, rows.length)]
           if (!row) return
-          if (row.directory === api.state.path.directory) {
-            api.route.navigate("session", { sessionID: row.id })
+          if (row.directory === (api.location ?? api.data.location.default()).directory) {
+            api.ui.router.navigate({ type: "session", sessionID: row.id })
             return
           }
           const command = resumeCommand(row.directory, row.id)
-          api.ui.dialog.setSize("medium")
-          api.ui.dialog.replace(() => (
-            <api.ui.DialogConfirm
-              title="Copy session start to clipboard?"
-              message="Cross-project sessions must be a new instance."
-              onConfirm={() => {
-                api.ui.dialog.clear()
-                const copied = api.renderer.copyToClipboardOSC52(command)
-                api.ui.toast({
-                  variant: copied ? "success" : "error",
-                  title: copied ? "Copied" : "Copy failed",
-                  message: copied ? "Session start command copied to clipboard." : "Your terminal does not support clipboard copying.",
-                })
-              }}
-              onCancel={() => api.ui.dialog.clear()}
-            />
-          ))
+          const confirmed = await api.ui.dialog.confirm({
+            title: "Copy session start to clipboard?",
+            message: "Open this cross-project session in a new terminal.",
+          })
+          if (!confirmed) return
+          const copied = api.renderer.copyToClipboardOSC52(command)
+          api.ui.toast.show({
+            variant: copied ? "success" : "error",
+            title: copied ? "Copied" : "Copy failed",
+            message: copied ? "Session start command copied to clipboard." : "Your terminal does not support clipboard copying.",
+          })
         },
       },
       {
-        name: commands.search,
+        id: commands.search,
+        bind: "/",
         title: "Search sessions",
-        hidden: true,
-        run() {
+        async run() {
           const value = state.get()
-          api.ui.dialog.setSize("large")
-          api.ui.dialog.replace(() => (
-            <api.ui.DialogPrompt
-              title="Search all sessions"
-              value={value.query}
-              placeholder="title, project, or message text"
-              onConfirm={(query) => { api.ui.dialog.clear(); update({ ...value, query, selected: 0 }) }}
-              onCancel={() => api.ui.dialog.clear()}
-            />
-          ))
+          const query = await api.ui.dialog.prompt({
+            title: "Search all sessions",
+            value: value.query,
+            placeholder: "title, project, or message text",
+          })
+          if (query !== undefined) update({ ...value, query, selected: 0 })
         },
       },
       {
-        name: commands.project,
+        id: commands.project,
+        bind: "p",
         title: "Filter projects",
-        hidden: true,
-        run() {
+        async run() {
           const value = state.get()
-          api.ui.dialog.setSize("large")
-          api.ui.dialog.replace(() => (
-            <api.ui.DialogSelect
-              title="Project"
-              current={value.projectID ?? ""}
-              options={[{ title: "All projects", value: "" }, ...index.projects().map((item) => ({ title: item.label, value: item.id, description: item.directory }))]}
-              onSelect={(option) => { api.ui.dialog.clear(); update({ ...value, projectID: option.value || undefined, selected: 0 }) }}
-            />
-          ))
+          const projectID = await api.ui.dialog.select({
+            title: "Project",
+            current: value.projectID ?? "",
+            options: [{ title: "All projects", value: "" }, ...index.projects().map((item) => ({ title: item.label, value: item.id, description: item.directory }))],
+          })
+          if (projectID !== undefined) update({ ...value, projectID: projectID || undefined, selected: 0 })
         },
       },
     ],
-    bindings: [
-      { key: "escape", cmd: commands.close, desc: "Back" },
-      { key: "/", cmd: commands.search, desc: "Search" },
-      { key: "p", cmd: commands.project, desc: "Project" },
-      { key: "s", cmd: commands.subagents, desc: "Toggle subagents" },
-      { key: "x", cmd: commands.clear, desc: "Clear filters" },
-      { key: "r", cmd: commands.refresh, desc: "Refresh" },
-      { key: "up,k", cmd: commands.up, desc: "Previous" },
-      { key: "down,j", cmd: commands.down, desc: "Next" },
-      { key: "enter,return", cmd: commands.select, desc: "Open" },
-    ],
-  })
+  }))
 }
 
-const tui: TuiPlugin = async (api, options) => {
-  const index = new SessionIndex(databasePath(api.state.path.state, options?.database))
-  const [value, setValue] = createSignal<BrowserState>({ query: "", showSubagents: false, selected: 0, back: { name: "home" } })
-  const state: StateStore = { get: value, set: setValue }
-  api.lifecycle.onDispose(() => {
-    if (api.route.current.name === ROUTE) api.route.navigate("home")
-    index.close()
-  })
-  api.route.register([{ name: ROUTE, render: () => <Browser api={api} index={index} state={state} /> }])
-  registerCommands(api, index, state)
-}
+export default Plugin.define({
+  id: "opencode-sessions-all",
+  setup(api) {
+    const index = new SessionIndex(databasePath(opencodeStateDirectory(), api.options.database))
+    const [value, setValue] = createSignal<BrowserState>({ query: "", showSubagents: false, selected: 0, back: { type: "home" } })
+    const state: StateStore = { get: value, set: setValue }
+    const unregister = api.ui.router.register({ name: ROUTE, render: () => <Browser api={api} index={index} state={state} /> })
+    registerCommands(api, index, state)
 
-const plugin: TuiPluginModule & { id: string } = { id: "opencode-sessions-all", tui }
-export default plugin
+    // The full paginated history is available on the client, unlike server context.
+    const controller = new AbortController()
+    const location = api.location ?? api.data.location.default()
+    const directories = new Map(index.projects().map((project) => [project.directory, project.id]))
+    directories.set(location.directory, "")
+    const backfill = (async () => {
+      for (const [directory, projectID] of directories) {
+        try {
+          await backfillProject(api.client, index, { directory, projectID }, controller.signal)
+        } catch (error) {
+          if (controller.signal.aborted) return
+          console.warn("opencode-sessions-all: full-history backfill failed", error)
+        }
+      }
+    })()
+
+    return async () => {
+      controller.abort()
+      const current = api.ui.router.current()
+      if (current.type === "plugin" && current.name === ROUTE) api.ui.router.navigate({ type: "home" })
+      unregister()
+      await backfill
+      index.close()
+    }
+  },
+})
