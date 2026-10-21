@@ -1,6 +1,6 @@
 {
   "name": "opencode-sessions-all",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Cross-project session search and navigation for OpenCode",
   "type": "module",
   "packageManager": "bun@1.4.3",
