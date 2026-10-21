@@ -1,3 +1,5 @@
+> Archived: Development has moved to [Opcode](https://github.com/zackarysantana/opcode). Install from that repository instead.
+
 # opencode-sessions-all
 
 [![npm](https://img.shields.io/npm/v/opencode-sessions-all)](https://www.npmjs.com/package/opencode-sessions-all)
